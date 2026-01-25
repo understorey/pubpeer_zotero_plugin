@@ -1,14 +1,12 @@
-/* eslint-disable */
-const fs = require('fs')
-const path = require('path')
-const esbuild = require('esbuild')
-const rmrf = require('rimraf')
+import path from 'path'
+import fs from 'fs'
+import esbuild from 'esbuild'
 
-rmrf.sync('gen')
+import 'zotero-plugin/make-dirs'
 
-require('zotero-plugin/copy-assets')
-require('zotero-plugin/manifest')
-require('zotero-plugin/version')
+import 'zotero-plugin/make-manifest'
+import 'zotero-plugin/make-version'
+import 'zotero-plugin/copy-assets'
 
 async function bundle(entry) {
   const outdir = 'build'
