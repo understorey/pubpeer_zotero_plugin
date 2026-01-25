@@ -1,5 +1,3 @@
-Components.utils.import('resource://gre/modules/AddonManager.jsm')
-
 import { DebugLog as DebugLogSender } from 'zotero-plugin/debug-log'
 import { log } from './debug'
 import { flash } from './flash'
@@ -90,48 +88,45 @@ function copyTree(sourceNode, targetNode) {
 }
 */
 
-$patch$.schedule(Zotero.Item.prototype, 'getField', original =>
-  function Zotero_Item_prototype_getField(field, _unformatted, _includeBaseMapped): string {
-    try {
-      if (field === 'pubpeer') {
-        if (Zotero.PubPeer.ready.isPending()) return ''
-        return `${Zotero.PubPeer.feedback(this).total_comments || ''}`
-      }
+$patch$.schedule(Zotero.Item.prototype, 'getField', original => function Zotero_Item_prototype_getField(field, _unformatted, _includeBaseMapped): string {
+  try {
+    if (field === 'pubpeer') {
+      return `${Zotero.PubPeer.feedback(this).total_comments || ''}`
     }
-    catch (err) {
-      Zotero.logError(`pubpeer patched getField: ${err}`)
-      return ''
-    }
+  }
+  catch (err) {
+    Zotero.logError(`pubpeer patched getField: ${err}`)
+    return ''
+  }
 
-    return original.apply(this, arguments) as string
-  })
+  return original.apply(this, arguments) as string
+})
 
-$patch$.schedule(Zotero.Integration.Session.prototype, 'addCitation', original =>
-  async function(index, noteIndex, citation) {
-    await original.apply(this, arguments)
-    try {
-      const ids = citation.citationItems.map((item: { id: number }) => item.id)
+$patch$.schedule(Zotero.Integration.Session.prototype, 'addCitation', original => async function(index, noteIndex, citation) {
+  await original.apply(this, arguments)
+  try {
+    const ids = citation.citationItems.map((item: { id: number }) => item.id)
 
-      const style = Zotero.Styles.get('http://www.zotero.org/styles/apa')
-      const cslEngine = style.getCiteProc('en-US')
+    const style = Zotero.Styles.get('http://www.zotero.org/styles/apa')
+    const cslEngine = style.getCiteProc('en-US')
 
-      if (ids.length) {
-        Zotero.Items.getAsync(ids).then(items => {
-          let feedback: Feedback
-          for (const item of items) {
-            if ((feedback = Zotero.PubPeer.feedback(item)).last_commented_at && !feedback.shown[this.sessionID]) {
-              const text = Zotero.Cite.makeFormattedBibliographyOrCitationList(cslEngine, [item], 'text')
-              flash('ALERT: PubPeer feedback', `This article "${item.getField('title')}" has comments on PubPeer: ${feedback.url}\n\n${text}`)
-              feedback.shown[this.sessionID] = true
-            }
+    if (ids.length) {
+      Zotero.Items.getAsync(ids).then(items => {
+        let feedback: Feedback
+        for (const item of items) {
+          if ((feedback = Zotero.PubPeer.feedback(item)).last_commented_at && !feedback.shown[this.sessionID]) {
+            const text = Zotero.Cite.makeFormattedBibliographyOrCitationList(cslEngine, [item], 'text')
+            flash('ALERT: PubPeer feedback', `This article "${item.getField('title')}" has comments on PubPeer: ${feedback.url}\n\n${text}`)
+            feedback.shown[this.sessionID] = true
           }
-        })
-      }
+        }
+      })
     }
-    catch (err) {
-      log.error('Zotero.Integration.Session.prototype.addCitation:', err.message)
-    }
-  })
+  }
+  catch (err) {
+    log.error('Zotero.Integration.Session.prototype.addCitation:', err.message)
+  }
+})
 
 const states = {
   name: ['neutral', 'priority', 'muted'],
@@ -163,7 +158,7 @@ const ready = Zotero.Promise.defer()
 export class $PubPeer {
   public item: any
 
-  public ready: Promise<boolean> & { isPending: () => boolean } = ready.promise
+  public ready: Promise<boolean> = ready.promise
   public users: Record<string, 'neutral' | 'priority' | 'muted'> = this.load()
   private dom = new DOMParser()
   private serializer = new XMLSerializer()
@@ -212,9 +207,10 @@ export class $PubPeer {
 
   public async startup() {
     await Zotero.initializationPromise
-    $patch$.execute()
     ready.resolve(true)
     await this.refresh()
+
+    $patch$.execute()
 
     this.itemObserver = Zotero.Notifier.registerObserver(this, ['item'], 'PubPeer', 1)
 
@@ -297,7 +293,7 @@ export class $PubPeer {
       },
     })
 
-    await Zotero.ItemTreeManager.registerColumn?.({
+    await Zotero.ItemTreeManager.registerColumn({
       dataKey: 'pubpeer',
       label: 'PubPeer',
       pluginID: 'pubpeer@pubpeer.com',
@@ -313,25 +309,20 @@ export class $PubPeer {
         cell.className = `pubpeer cell ${column.className}`
         let icon
         if (data) {
-          if (PubPeer.ready.isPending()) {
-            icon = states.icon.loading
+          const [total, itemID] = data.split('\t')
+          cell.textContent = total
+
+          const item = Zotero.Items.get(parseInt(itemID))
+          const feedback = this.feedback(item)
+          const state = feedback.users.map(user => Zotero.PubPeer.users[user])
+          if (state.includes('priority')) {
+            icon = states.icon.highlighted
+          }
+          else if (state.includes('neutral')) {
+            icon = states.icon.neutral
           }
           else {
-            const [total, itemID] = data.split('\t')
-            cell.textContent = total
-
-            const item = Zotero.Items.get(parseInt(itemID))
-            const feedback = this.feedback(item)
-            const state = feedback.users.map(user => Zotero.PubPeer.users[user])
-            if (state.includes('priority')) {
-              icon = states.icon.highlighted
-            }
-            else if (state.includes('neutral')) {
-              icon = states.icon.neutral
-            }
-            else {
-              icon = states.icon.muted
-            }
+            icon = states.icon.muted
           }
         }
         if (icon) {
